@@ -1,5 +1,5 @@
 # quickGCNs 
-## Use quickGCNs quickly train typical GCN models
+## Use quickGCNs to quickly train typical GCN models
 quickGCNs 是一个能够快速调用并且训练Pyg提供的GCN基础模型的模型集成框架；  
 quickGCNs 能够保存最佳参数组合的评估结果并且画图保存，以及每次重复实验测试的结果；  
 quickGCNs 支持自定义模型；  
