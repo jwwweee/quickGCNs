@@ -9,10 +9,10 @@ and execute grid search to find the best hyperparameters group.
 
 quickGCNs is based on the package torch_geometric
 
-version 1.0
+version 1.1
 In this version only can process node-regression task.
 
-Update on 2021/05/22
+Update on 2021/05/24
 """
 
 from torch_geometric.data import DataLoader
@@ -34,6 +34,7 @@ import csv
 import models
 
 import os 
+import random
 
 import pandas as pd
 
@@ -51,11 +52,11 @@ def mkdir(path):
 		os.makedirs(path)            #makedirs 创建文件时如果路径不存在会创建这个路径
 
 def train(dataset, train_param_list, model_param_list, Model, use_cuda):
-    bs, split_rate, wd, lr, ep = train_param_list
+    split_rate, wd, lr, ep = train_param_list
 
     data_size = len(dataset)
-    loader = DataLoader(dataset[:int(data_size * split_rate)], batch_size=bs, shuffle=True)
-    test_loader = DataLoader(dataset[int(data_size * split_rate):], batch_size=bs, shuffle=False)
+    loader = DataLoader(dataset[:int(data_size * split_rate)], batch_size=1, shuffle=True)
+    test_loader = DataLoader(dataset[int(data_size * split_rate):], batch_size=1, shuffle=False)
 
     # 建立 model 和 参数设置
     model = Model(model_param_list)
@@ -80,14 +81,14 @@ def train(dataset, train_param_list, model_param_list, Model, use_cuda):
 
         total_loss = 0
         i=0
-        for batch in loader:
+        for train_data in loader:
             opt.zero_grad()
             
             if (use_gpu) and (use_cuda):
-                batch = batch.to(device)
+                train_data = train_data.to(device)
 
-            pred = model(batch)
-            label = batch.y
+            pred = model(train_data)
+            label = train_data.y
             
             if (use_gpu) and (use_cuda):
                 label = label.to(device)
@@ -104,7 +105,7 @@ def train(dataset, train_param_list, model_param_list, Model, use_cuda):
 
             opt.step()
             i+=1
-            total_loss += loss.item() * batch.num_graphs
+            total_loss += loss.item() * train_data.num_graphs
         total_loss /= len(loader.dataset)
 
         loss_list.append(total_loss)
@@ -127,10 +128,10 @@ def train(dataset, train_param_list, model_param_list, Model, use_cuda):
 def test(loader, model, is_validation=False):
     model.eval()
     i=0
-    for data in loader:
+    for test_data in loader:
         with torch.no_grad():
-            test_pred = model(data)
-            label = data.y
+            test_pred = model(test_data)
+            label = test_data.y
 
             if i==0:
                 test_preds = test_pred
@@ -172,7 +173,7 @@ def save_rows(save_path, model_name, labels, pred_list, train_param_list, model_
         #保存一个最佳模型的多次测试结果
         mkdir(save_path + '/records/node_'+ str(i) + '/')
         with open(save_path + '/records/node_'+ str(i) + '/' + 'best_' + model_name + '_node_' + str(i) + '_record.csv','w',newline="") as f:
-            headers = ['batch_size', 'split_rate', 'weight_decay', 'learning_rate', 'EPOCH', 'feat_dims', 'hidden_dims', 'actfunc_type', 'layer_num', 'K', 'MSE', 'RMSE', 'MAE', 'R2']
+            headers = ['split_rate', 'weight_decay', 'learning_rate', 'EPOCH', 'feat_dims', 'hidden_dims', 'actfunc_type', 'layer_num', 'K', 'MSE', 'RMSE', 'MAE', 'R2']
             f_csv = csv.writer(f)
             f_csv.writerow(headers)
             f_csv.writerows(rows)
@@ -193,8 +194,8 @@ def save(save_path, model_name, mean_preds, labels, model, mean_rows):
     # 保存最佳模型的参数和结果
     mkdir(save_path + '/records/')
     
-    with open(save_path + '/param_result_records/'+ 'best_' + model_name + '_mean_record.csv','w',newline="") as f:
-        headers = ['node_id', 'batch_size', 'split_rate', 'weight_decay', 'learning_rate', 'EPOCH', 'train_times', 'feat_dims', 'hidden_dims', 'actfunc_type', 'layer_num', 'K', 'MSE', 'RMSE', 'MAE', 'R2']
+    with open(save_path + '/records/'+ 'best_' + model_name + '_mean_record.csv','w',newline="") as f:
+        headers = ['node_id', 'split_rate', 'weight_decay', 'learning_rate', 'EPOCH', 'train_times', 'feat_dims', 'hidden_dims', 'actfunc_type', 'layer_num', 'K', 'MSE', 'RMSE', 'MAE', 'R2']
         f_csv = csv.writer(f)
         f_csv.writerow(headers)
         f_csv.writerows(mean_rows)
@@ -206,15 +207,13 @@ def grid_search(dataset, Model, input_split_rate, eval_score, train_times, save_
 
     # training 相关超参数
     train_param = {
-    'batch_size': [1, 3, 5],
     'split_rate': input_split_rate,
     'weight_decay': [0, 1e-1, 1e-2, 1e-3, 1e-4],
     'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4],
-    'EPOCH': [151, 201, 251, 301, 351, 401],
+    'EPOCH': [151],
     'train_times' : train_times
 
     # testing params
-    # 'batch_size': [1],
     # 'split_rate': input_split_rate,
     # 'weight_decay': [0],
     # 'learning_rate': [1e-1],
@@ -224,22 +223,21 @@ def grid_search(dataset, Model, input_split_rate, eval_score, train_times, save_
 
     # model 相关超参数
     model_param = {
-        'feat_dims': dataset[0].num_node_features, # 需要每个图的结构一样
-        'hidden_dims': [16, 32, 64, 128, 256],
-        'actfunc_type': ['relu'],
-        'layer_num': [1, 2, 3, 4],
-        'K':[1, 2, 3, 4]
+    'feat_dims': dataset[0].num_node_features,
+    'hidden_dims': [8, 16, 32, 64, 128],
+    'actfunc_type': ['relu'],
+    'layer_num': [1, 2, 3, 4],
+    'K':[1, 2, 3, 4]
 
-        # # testing params
-        # 'feat_dims': dataset[0].num_node_features, # 需要每个图的结构一样
-        # 'hidden_dims': [16],
-        # 'actfunc_type': ['relu'],
-        # 'layer_num': [1,2],
-        # 'K':[1]
+    # # testing params
+    # 'feat_dims': dataset[0].num_node_features, 
+    # 'hidden_dims': [16],
+    # 'actfunc_type': ['relu'],
+    # 'layer_num': [1,2],
+    # 'K':[1]
     }
 
     # 超参数初始化
-    batch_size = train_param['batch_size']
     split_rate = train_param['split_rate']
     weight_decay = train_param['weight_decay']
     learning_rate = train_param['learning_rate']
@@ -263,96 +261,261 @@ def grid_search(dataset, Model, input_split_rate, eval_score, train_times, save_
             
     grid_id = 0
     # 网格搜索
-    for bs in batch_size:
-        for wd in weight_decay:
-            for lr in learning_rate:
-                for ep in EPOCH:
-                    #  GGNN 特殊情况 in_channel=outchannel
-                    if model_name=='GGNN':
-                        hidden_dims = [feat_dims]
-                    for hd in hidden_dims:
-                        for at in actfunc_type:
-                            for ln in layer_num:
-                                # ChebNet特殊参数k
-                                if model_name != 'ChebNet':
-                                    K=[0]
-                                for k in K:
-                                    # 断点check
-                                    if(id_log>=id):
-                                        id+=1
-                                    else:
-                                        train_param_list = [bs, split_rate, wd, lr, ep]
-                                        model_param_list = [feat_dims, hd, at, ln, k]
+    for wd in weight_decay:
+        for lr in learning_rate:
+            for ep in EPOCH:
+                #  GGNN 特殊情况 in_channel=outchannel
+                if model_name == 'GGNN':
+                    hidden_dims = [feat_dims]
+                for hd in hidden_dims:
+                    for at in actfunc_type:
+                        for ln in layer_num:
+                            # ChebNet特殊参数k
+                            if model_name != 'ChebNet':
+                                K=[0]
+                            for k in K:
+                                # 断点check
+                                if(id_log>=id):
+                                    id+=1
+                                else:
+                                    train_param_list = [split_rate, wd, lr, ep]
+                                    model_param_list = [feat_dims, hd, at, ln, k]
 
-                                        # 多次训练测试稳定
-                                        pred_list = [] # 用于记录
-                                        for t in range(train_times):
-                                            model, test_preds, labels = train(dataset, train_param_list, model_param_list, Model, use_cuda)
-                                            print('Start to train', model_name, 'with params:', train_param_list + model_param_list, str(t+1), 'times')
-                                            
-                                            pred_list.append(test_preds)
-
-                                            if t==0:
-                                                sum_preds = test_preds
-                                            else:
-                                                sum_preds = sum_preds + test_preds
+                                    # 多次训练测试稳定
+                                    pred_list = [] # 用于记录
+                                    for t in range(train_times):
+                                        model, test_preds, labels = train(dataset, train_param_list, model_param_list, Model, use_cuda)
+                                        print('Start to train', model_name, 'with params:', train_param_list + model_param_list, str(t+1), 'times')
                                         
-                                        mean_preds = sum_preds / train_times
+                                        pred_list.append(test_preds)
 
-                                        mean_rows = []
-                                        for i in range(len(labels)):
-                                            mean_mse, mean_rmse, mean_mae, mean_r2 = eval(labels[i], mean_preds[i])
-                                            mean_row = [i] + train_param_list + [train_times] + model_param_list + [mean_mse, mean_rmse, mean_mae, mean_r2]
-                                            mean_rows.append(mean_row)
+                                        if t==0:
+                                            sum_preds = test_preds
+                                        else:
+                                            sum_preds = sum_preds + test_preds
+                                    
+                                    mean_preds = sum_preds / train_times
 
-                                        # 保存每个模型第一次运行组合结果，如果后门有更好的则被覆盖
-                                        if grid_id==0:
+                                    mean_rows = []
+                                    for i in range(len(labels)):
+
+                                        mean_mse, mean_rmse, mean_mae, mean_r2 = eval(labels[i], mean_preds[i])
+                                        mean_row = [i] + train_param_list + [train_times] + model_param_list + [mean_mse, mean_rmse, mean_mae, mean_r2]
+                                        mean_rows.append(mean_row)
+                                        if i==0:
+                                            sum_mean_mse = mean_mse
+                                            sum_mean_rmse = mean_rmse
+                                            sum_mean_mae = mean_mae
+                                            sum_mean_r2 = mean_r2
+                                        else:
+                                            sum_mean_mse = mean_mse + sum_mean_mse
+                                            sum_mean_rmse = mean_rmse + sum_mean_rmse
+                                            sum_mean_mae = mean_mae + sum_mean_mae
+                                            sum_mean_r2 = mean_r2 + sum_mean_r2
+                                    
+                                    total_mean_mse = sum_mean_mse/len(labels)
+                                    total_mean_rmse = sum_mean_rmse/len(labels)
+                                    total_mean_mae = sum_mean_mae/len(labels)
+                                    total_mean_r2 = sum_mean_r2/len(labels)
+
+                                    # 保存每个模型第一次运行组合结果，如果后门有更好的则被覆盖
+                                    if grid_id==0:
+                                        save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                                        save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+
+                                    # 更新 best score，选择不同eval方法
+                                    if eval_score == 'mse':
+                                        score = total_mean_mse
+                                        if score < best_score:
+                                            best_score = score
                                             save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
                                             save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
 
-                                        # 更新 best score，选择不同eval方法
-                                        if eval_score == 'mse':
-                                            score = mean_mse
-                                            if score < best_score:
-                                                best_score = score
-                                                save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
-                                                save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+                                    elif eval_score == 'rmse':
+                                        score = total_mean_rmse
+                                        if score < best_score:
+                                            best_score = score
+                                            save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                                            save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
 
-                                        elif eval_score == 'rmse':
-                                            score = mean_rmse
-                                            if score < best_score:
-                                                best_score = score
-                                                save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
-                                                save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+                                    elif eval_score == 'mae':
+                                        score = total_mean_mae
+                                        if score < best_score:
+                                            best_score = score
+                                            save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                                            save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
 
-                                        elif eval_score == 'mae':
-                                            score = mean_mae
-                                            if score < best_score:
-                                                best_score = score
-                                                save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
-                                                save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
-
-                                        elif eval_score == 'r2':
-                                            score = mean_r2
-                                            if score > best_score:
-                                                best_score = score
-                                                save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
-                                                save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图 
-
-                                        # 记录断点log文件
-                                        mkdir(save_path)
-                                        with open(save_path + '/model_run_check_point_log.csv','a',newline="") as f:
-                                            row = [id, model_name] + train_param_list + model_param_list
-                                            f_csv = csv.writer(f)
-                                            f_csv.writerow(row)
-                                            
-                                        id+=1
-                                        grid_id+=1
+                                    elif eval_score == 'r2':
+                                        score = total_mean_r2
+                                        if score > best_score:
+                                            best_score = score
+                                            save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                                            save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图 
+                                    # 记录断点log文件
+                                    mkdir(save_path)
+                                    with open(save_path + '/model_run_check_point_log.csv','a',newline="") as f:
+                                        row = [id, model_name] + train_param_list + model_param_list
+                                        f_csv = csv.writer(f)
+                                        f_csv.writerow(row)
+                                        
+                                    id+=1
+                                    grid_id+=1
     
     return id
-                                    
+
+def random_search(dataset, Model, input_split_rate, eval_score, train_times, save_path, model_name, use_cuda, id):
+
+    # training 相关超参数
+    train_param = {
+    'split_rate': [input_split_rate],
+    'weight_decay': [0, 1e-1, 1e-2, 1e-3, 1e-4],
+    'learning_rate': [1e-1, 1e-2, 1e-3, 1e-4],
+    'EPOCH': [151, 201, 251, 301, 351, 401],
+    'train_times' : [train_times]
+    }
+
+    # model 相关超参数
+    model_param = {
+    'feat_dims': [dataset[0].num_node_features],
+    'hidden_dims': [16, 32, 64, 128, 256],
+    'actfunc_type': ['relu'],
+    'layer_num': [1, 2, 3, 4],
+    'K':[1, 2, 3, 4]
+    }
+    
+    
+    if(os.path.exists(save_path + '/model_run_check_point_log.csv')):
+        data = pd.read_csv(save_path + '/model_run_check_point_log.csv')
+        if(data.shape[0]>1):
+            id_log = int(data.values[-1,0])
+        else:
+            id_log = 0
+    else:
+            id_log = 0
+            
+    grid_id = 0
+    MAX_EVALS = 500 # 设置忍耐度
+
+    # 记录用
+    best_score = 0
+
+    tmp_dict = dict(train_param, **model_param)
+    
+    # 随机搜索
+    for i in range(MAX_EVALS):
+        random.seed(i)	# 设置随机种子，每次搜索设置不同的种子，若种子固定，那每次选取的超参都是一样的
+        hyperparameters = {k: random.sample(v, 1)[0] for k, v in tmp_dict.items()}
+        
+        # 超参数提取
+        split_rate = hyperparameters['split_rate']
+        weight_decay = hyperparameters['weight_decay']
+        learning_rate = hyperparameters['learning_rate']
+        EPOCH = hyperparameters['EPOCH']
+        train_times = hyperparameters['train_times']
+
+        feat_dims = hyperparameters['feat_dims']
+        hidden_dims = hyperparameters['hidden_dims']
+        actfunc_type = hyperparameters['actfunc_type']
+        layer_num = hyperparameters['layer_num']
+        K = hyperparameters['K']
+        
+        # ChebNet特殊参数k
+        if model_name != 'ChebNet':
+            K=0
+
+        if model_name == 'GGNN':
+            hidden_dims = feat_dims
+
+        # 断点check
+        if(id_log>=id):
+            id+=1
+        else:
+            train_param_list = [split_rate, weight_decay, learning_rate, EPOCH]
+            model_param_list = [feat_dims, hidden_dims, actfunc_type, layer_num, K]
+
+            # 多次训练测试稳定
+            pred_list = [] # 用于记录
+            for t in range(train_times):
+                model, test_preds, labels = train(dataset, train_param_list, model_param_list, Model, use_cuda)
+                print('Start to train', model_name, 'with params:', train_param_list + model_param_list, str(t+1), 'times')
+                
+                pred_list.append(test_preds)
+
+                if t==0:
+                    sum_preds = test_preds
+                else:
+                    sum_preds = sum_preds + test_preds
+            
+            mean_preds = sum_preds / train_times
+
+            mean_rows = []
+            for i in range(len(labels)):
+                mean_mse, mean_rmse, mean_mae, mean_r2 = eval(labels[i], mean_preds[i])
+                mean_row = [i] + train_param_list + [train_times] + model_param_list + [mean_mse, mean_rmse, mean_mae, mean_r2]
+                mean_rows.append(mean_row)
+                if i==0:
+                    sum_mean_mse = mean_mse
+                    sum_mean_rmse = mean_rmse
+                    sum_mean_mae = mean_mae
+                    sum_mean_r2 = mean_r2
+                else:
+                    sum_mean_mse = mean_mse + sum_mean_mse
+                    sum_mean_rmse = mean_rmse + sum_mean_rmse
+                    sum_mean_mae = mean_mae + sum_mean_mae
+                    sum_mean_r2 = mean_r2 + sum_mean_r2
+            
+            total_mean_mse = sum_mean_mse/len(labels)
+            total_mean_rmse = sum_mean_rmse/len(labels)
+            total_mean_mae = sum_mean_mae/len(labels)
+            total_mean_r2 = sum_mean_r2/len(labels)
+
+            # 保存每个模型第一次运行组合结果，如果后门有更好的则被覆盖
+            if grid_id==0:
+                save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+
+            # 更新 best score，选择不同eval方法
+            if eval_score == 'mse':
+                score = total_mean_mse
+                if score < best_score:
+                    best_score = score
+                    save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                    save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+
+            elif eval_score == 'rmse':
+                score = total_mean_rmse
+                if score < best_score:
+                    best_score = score
+                    save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                    save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+
+            elif eval_score == 'mae':
+                score = total_mean_mae
+                if score < best_score:
+                    best_score = score
+                    save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                    save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图
+
+            elif eval_score == 'r2':
+                score = total_mean_r2
+                if score > best_score:
+                    best_score = score
+                    save_rows(save_path, model_name, labels, pred_list, train_param_list, model_param_list) # 保存最佳模型多次测试结果
+                    save(save_path, model_name, mean_preds, labels, model, mean_rows) # 保存最佳模型平均测试结果、画图 
+
+            # 记录断点log文件
+            mkdir(save_path)
+            with open(save_path + '/model_run_check_point_log.csv','a',newline="") as f:
+                row = [id, model_name] + train_param_list + model_param_list
+                f_csv = csv.writer(f)
+                f_csv.writerow(row)
+                
+            id+=1
+            grid_id+=1
+    
+    return id
                                        
-def fit(dataset, input_split_rate, eval_score, train_times, save_path='.', use_cuda=False):
+def fit(dataset, input_split_rate, eval_score, train_times, save_path='.', search_method='random', use_cuda=False):
 
     mkdir(save_path)
     Models = [models.ChebNet, models.GGNN, models.GCN, models.GAT]
@@ -361,5 +524,7 @@ def fit(dataset, input_split_rate, eval_score, train_times, save_path='.', use_c
     id = 1 # 用于记录断点 
 
     for idx, Model in enumerate(Models):
-       id = grid_search(dataset, Model, input_split_rate, eval_score, train_times, save_path, model_name[idx], use_cuda, id)
-
+        if search_method=='grid':
+            id = grid_search(dataset, Model, input_split_rate, eval_score, train_times, save_path, model_name[idx], use_cuda, id)
+        elif search_method=='random':
+            id = random_search(dataset, Model, input_split_rate, eval_score, train_times, save_path, model_name[idx], use_cuda, id)
