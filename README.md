@@ -5,3 +5,17 @@ quickGCNs 能够保存最佳参数组合的评估结果并且画图保存，以�
 quickGCNs 支持自定义模型；  
 quickGCNs 能够记录训练日志，并且断点恢复训练；  
 quickGCNs 能够通过网格搜索(grid search)或者随机搜索(random search)来找出模型最优参数组合。
+## Installations
+numpy  
+pandas  
+matplotlib  
+skearn  
+pytorch  
+torch_geometric
+## Files
+quickGCNs.py：框架主要实现文件
+models.py：GCN模型存放文件
+demo.ipynb：运行demo文件
+## History
+2021/05/22: upload first quickGCNs files.  
+2021/05/24: 修复Bug，添加random search方法.
