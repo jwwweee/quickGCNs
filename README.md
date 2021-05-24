@@ -18,4 +18,4 @@ models.py：GCN模型存放文件
 demo.ipynb：运行demo文件
 ## History
 2021/05/22: upload first quickGCNs files.  
-2021/05/24: 修复Bug，添加random search方法.
+2021/05/24: 修复Bug，添加random search方法，添加demo文件.
