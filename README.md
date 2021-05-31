@@ -25,6 +25,7 @@ torch_geometric
 quickGCNs.py：框架主要实现文件  
 models.py：GCN模型存放文件  
 demo.ipynb：运行demo文件  
+graph_data文件夹：存放demo数据集
 ## 更新日志
 1. 2021/05/22: upload first quickGCNs files.  
 2. 2021/05/24: 修复Bug，添加random search方法，添加demo文件.  
